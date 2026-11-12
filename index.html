@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TV Tarayıcı Testi</title>
+<style>
+  :root { --bg:#0b0b0f; --card:#17171f; --text:#f2f2f5; --dim:#9a9aa8; --ok:#3ecf6e; --bad:#ff5a5a; --warn:#ffc043; --accent:#e50914; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--text); font-family:Arial, Helvetica, sans-serif; }
+  body { padding:28px 48px; font-size:22px; }
+  h1 { margin:0 0 4px; font-size:38px; }
+  h2 { margin:22px 0 10px; font-size:26px; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; }
+  #status { font-size:26px; color:var(--warn); margin:6px 0 10px; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:24px; }
+  .card { background:var(--card); border-radius:14px; padding:16px 20px; }
+  table { width:100%; border-collapse:collapse; }
+  td { padding:5px 6px; border-bottom:1px solid #26262f; vertical-align:top; }
+  td.r { text-align:right; white-space:nowrap; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); } .dim { color:var(--dim); }
+  #stage { position:relative; width:100%; aspect-ratio:16/9; background:#000; border-radius:10px; overflow:hidden; }
+  #stage video { width:100%; height:100%; }
+  #overlay { position:absolute; left:0; right:0; bottom:8%; text-align:center; pointer-events:none; }
+  #overlay span { display:inline-block; padding:4px 14px; border-radius:6px; background:rgba(0,0,0,.6); color:#fff; font-size:34px;
+                  text-shadow:0 0 4px #000, 0 2px 3px #000; }
+  #keys { font-family:monospace; font-size:22px; min-height:120px; }
+  .btn { display:inline-block; margin:8px 12px 0 0; padding:14px 26px; border-radius:10px; background:#2a2a35; color:#fff;
+         font-size:24px; border:3px solid transparent; }
+  .btn:focus { border-color:#fff; background:var(--accent); outline:none; }
+  .big { font-size:30px; }
+</style>
+</head>
+<body>
+<h1>TV Tarayıcı Testi</h1>
+<div id="status">Hazırlanıyor…</div>
+
+<div class="grid">
+  <div>
+    <div id="stage"><video id="v" playsinline></video><div id="overlay"><span>Bizim altyazı: ğüşıöç ĞÜŞİÖÇ</span></div></div>
+    <div class="card" style="margin-top:16px">
+      <div class="big">Kumanda testi</div>
+      <div class="dim">Testler bitince sırayla bas: ↑ ↓ ← → OK, Oynat/Duraklat, İleri, Geri sar. <b>Geri (↩) tuşuna en son bas.</b></div>
+      <div id="keys" class="dim">Henüz tuş yok</div>
+      <button class="btn" id="fs">Tam ekran dene</button>
+      <button class="btn" id="again">Testi tekrarla</button>
+    </div>
+  </div>
+  <div>
+    <div class="card"><h2 style="margin-top:0">Oynatma</h2><table id="play"></table></div>
+    <div class="card" style="margin-top:16px"><h2 style="margin-top:0">Cihaz</h2><table id="env"></table></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var R = { env:{}, canPlay:{}, mse:{}, play:[], seek:null, subs:{}, fonts:{}, keys:[], fullscreen:null, done:false };
+  var v = document.getElementById('v');
+  function $(id) { return document.getElementById(id); }
+  function status(t) { $('status').textContent = t; }
+  function send() {
+    if (location.port !== '8765') return;
+    try {
+      var x = new XMLHttpRequest();
+      x.open('POST', '/report', true);
+      x.setRequestHeader('Content-Type', 'application/json');
+      x.send(JSON.stringify(R));
+    } catch (e) {}
+  }
+  function row(tbl, a, b, cls) {
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + a + '</td><td class="r ' + (cls || '') + '">' + b + '</td>';
+    $(tbl).appendChild(tr);
+    return tr;
+  }
+
+  // ---- 1. Cihaz bilgisi ----
+  function env() {
+    var e = R.env;
+    e.ua = navigator.userAgent;
+    e.screen = screen.width + 'x' + screen.height;
+    e.viewport = window.innerWidth + 'x' + window.innerHeight;
+    e.dpr = window.devicePixelRatio;
+    e.secure = !!window.isSecureContext;
+    e.mse = !!window.MediaSource;
+    e.serviceWorker = 'serviceWorker' in navigator;
+    e.fullscreenApi = !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
+    e.tizen = typeof window.tizen !== 'undefined';
+    e.webapis = typeof window.webapis !== 'undefined';
+    e.localStorage = (function () { try { localStorage.setItem('t', '1'); return localStorage.getItem('t') === '1'; } catch (x) { return false; } })();
+    e.fetch = typeof window.fetch === 'function';
+    e.gridSupport = !!(window.CSS && CSS.supports && CSS.supports('display', 'grid'));
+    e.aspectRatioCss = !!(window.CSS && CSS.supports && CSS.supports('aspect-ratio', '16/9'));
+    var m = /Chrome\/(\d+)/.exec(e.ua); e.chrome = m ? +m[1] : null;
+    var mt = /Tizen (\d+\.\d+)/.exec(e.ua); e.tizenVersion = mt ? mt[1] : null;
+    row('env', 'Tarayıcı', (e.tizenVersion ? 'Tizen ' + e.tizenVersion + ' · ' : '') + (e.chrome ? 'Chrome ' + e.chrome : '?'));
+    row('env', 'Ekran / sayfa', e.screen + ' / ' + e.viewport + ' @' + e.dpr);
+    row('env', 'MSE (akış)', e.mse ? '✅' : '❌', e.mse ? 'ok' : 'bad');
+    row('env', 'Tam ekran API', e.fullscreenApi ? '✅' : '❌', e.fullscreenApi ? 'ok' : 'bad');
+    row('env', 'Kayıt (localStorage)', e.localStorage ? '✅' : '❌', e.localStorage ? 'ok' : 'bad');
+    row('env', 'Güvenli bağlam (https)', e.secure ? 'evet' : 'hayır (yerel test, normal)', 'dim');
+
+    var types = {
+      'mp4 h264+aac': 'video/mp4; codecs="avc1.640028, mp4a.40.2"',
+      'mp4 hevc': 'video/mp4; codecs="hvc1.1.6.L120.90"',
+      'mp4 hevc 10bit': 'video/mp4; codecs="hvc1.2.4.L153.B0"',
+      'mp4 dolby vision': 'video/mp4; codecs="dvh1.05.06"',
+      'mp4 av1': 'video/mp4; codecs="av01.0.08M.08"',
+      'mp4 ac3': 'video/mp4; codecs="ac-3"',
+      'mp4 eac3': 'video/mp4; codecs="ec-3"',
+      'webm vp9': 'video/webm; codecs="vp9, opus"',
+      'mkv': 'video/x-matroska',
+      'mkv h264': 'video/x-matroska; codecs="avc1.640028"'
+    };
+    for (var k in types) {
+      R.canPlay[k] = v.canPlayType(types[k]);
+      try { R.mse[k] = window.MediaSource ? MediaSource.isTypeSupported(types[k]) : false; } catch (x) { R.mse[k] = 'err'; }
+    }
+  }
+
+  // ---- 2. Oynatma testleri ----
+  var FILES = [
+    ['h264_aac.mp4',     'MP4 · H.264 · AAC (temel)'],
+    ['h264_aac.mkv',     'MKV · H.264 · AAC'],
+    ['h264_subs.mkv',    'MKV · gömülü TR altyazı'],
+    ['hevc_aac.mp4',     'MP4 · HEVC 1080p'],
+    ['hevc_aac.mkv',     'MKV · HEVC 1080p'],
+    ['h264_ac3.mp4',     'Ses: AC3 (Dolby)'],
+    ['h264_eac3.mp4',    'Ses: E-AC3 (Dolby+)'],
+    ['h264_dts.mkv',     'Ses: DTS'],
+    ['h264_4k.mp4',      '4K · H.264'],
+    ['hevc_4k_hdr10.mp4','4K · HEVC · HDR10'],
+    ['av1_aac.mp4',      'AV1'],
+    ['vp9_opus.webm',    'WebM · VP9']
+  ];
+
+  function testOne(file, label) {
+    return new Promise(function (resolve) {
+      var r = { file:file, label:label, ok:false, muted:false, err:null, w:0, h:0, t:0, audioBytes:null, textTracks:0, frames:null, dropped:null };
+      var tr = row('play', label, '⏳', 'warn');
+      var finished = false;
+      function finish() {
+        if (finished) return; finished = true;
+        clearInterval(poll); clearTimeout(limit);
+        r.w = v.videoWidth; r.h = v.videoHeight; r.t = Math.round(v.currentTime * 10) / 10;
+        if (typeof v.webkitAudioDecodedByteCount === 'number') r.audioBytes = v.webkitAudioDecodedByteCount;
+        if (v.audioTracks) r.audioTracks = v.audioTracks.length;
+        r.textTracks = v.textTracks ? v.textTracks.length : 0;
+        if (v.getVideoPlaybackQuality) { var q = v.getVideoPlaybackQuality(); r.frames = q.totalVideoFrames; r.dropped = q.droppedVideoFrames; }
+        r.ok = r.t >= 1.5 && r.w > 0;
+        var noAudio = r.ok && r.audioBytes === 0;
+        var txt = r.ok ? ('✅ ' + r.w + 'x' + r.h) : ('❌ ' + (r.err || 'oynamadı'));
+        if (noAudio) txt = '⚠️ görüntü var, ses yok';
+        if (r.ok && r.muted && !noAudio) txt += ' (sessiz)';
+        if (file === 'h264_subs.mkv' && r.ok) txt += r.textTracks ? ' · altyazı ✅' : ' · altyazı ❌';
+        tr.lastChild.textContent = txt;
+        tr.lastChild.className = 'r ' + (noAudio ? 'warn' : r.ok ? 'ok' : 'bad');
+        v.pause(); v.removeAttribute('src'); v.load();
+        R.play.push(r); send();
+        setTimeout(function () { resolve(r); }, 300);
+      }
+      v.onerror = function () { r.err = 'hata ' + (v.error ? v.error.code : '?'); finish(); };
+      var poll = setInterval(function () { if (v.currentTime >= 2.2) finish(); }, 200);
+      var limit = setTimeout(finish, 12000);
+      v.muted = false;
+      v.src = 'media/' + file;
+      var p = v.play();
+      if (p && p.catch) p.catch(function (e) {
+        if (finished) return;
+        if (e && e.name === 'NotAllowedError') { r.muted = true; v.muted = true; var p2 = v.play(); if (p2 && p2.catch) p2.catch(function (e2) { r.err = e2.name; finish(); }); }
+        else if (e && e.name !== 'AbortError') { r.err = e.name; }
+      });
+    });
+  }
+
+  function seekTest() {
+    return new Promise(function (resolve) {
+      var tr = row('play', 'İleri sarma (MP4)', '⏳', 'warn');
+      var t0 = 0, done = false;
+      function end(ok, why) {
+        if (done) return; done = true;
+        R.seek = { ok:ok, ms: Date.now() - t0, why:why || null };
+        tr.lastChild.textContent = ok ? ('✅ ' + R.seek.ms + ' ms') : ('❌ ' + (why || ''));
+        tr.lastChild.className = 'r ' + (ok ? 'ok' : 'bad');
+        v.pause(); send(); resolve();
+      }
+      v.muted = true;
+      v.src = 'media/h264_aac.mp4';
+      v.onloadedmetadata = function () { t0 = Date.now(); v.currentTime = 4.5; };
+      v.onseeked = function () { end(Math.abs(v.currentTime - 4.5) < 1); };
+      v.onerror = function () { end(false, 'hata'); };
+      setTimeout(function () { end(false, 'zaman aşımı'); }, 10000);
+    }).then(function () { v.onloadedmetadata = v.onseeked = null; });
+  }
+
+  function subtitleTest() {
+    return new Promise(function (resolve) {
+      var tr = row('play', 'Dış altyazı (VTT)', '⏳', 'warn');
+      v.muted = true;
+      v.src = 'media/h264_aac.mp4';
+      var t = document.createElement('track');
+      t.kind = 'subtitles'; t.srclang = 'tr'; t.label = 'Türkçe'; t.src = 'media/tr.vtt'; t.default = true;
+      v.appendChild(t);
+      var cueSeen = false;
+      v.play().catch(function () {});
+      setTimeout(function () {
+        var tt = v.textTracks && v.textTracks[0];
+        if (tt) { tt.mode = 'showing'; cueSeen = !!(tt.cues && tt.cues.length); }
+        R.subs.vttCues = cueSeen;
+        R.subs.vttText = cueSeen ? tt.cues[0].text : null;
+        tr.lastChild.textContent = cueSeen ? '✅ okundu' : '❌';
+        tr.lastChild.className = 'r ' + (cueSeen ? 'ok' : 'bad');
+        v.pause(); v.removeChild(t); send(); resolve();
+      }, 3500);
+    });
+  }
+
+  function fontTest() {
+    var c = document.createElement('canvas').getContext('2d');
+    var s = 'ğüşıöç ĞÜŞİÖÇ mmmmwwwlli';
+    function w(f) { c.font = '40px ' + f; return c.measureText(s).width; }
+    var base = { mono:w('monospace'), serif:w('serif'), sans:w('sans-serif') };
+    ['Helvetica Neue', 'Helvetica', 'Arial', 'Georgia', 'Roboto', 'SamsungOne', 'Samsung Sans', 'TizenSans', 'Noto Sans', 'Verdana', 'DejaVu Sans'].forEach(function (f) {
+      var has = w("'" + f + "', monospace") !== base.mono || w("'" + f + "', serif") !== base.serif;
+      R.fonts[f] = has;
+    });
+    row('env', 'Fontlar', Object.keys(R.fonts).filter(function (f) { return R.fonts[f]; }).join(', ') || 'sadece varsayılan', 'dim');
+  }
+
+  // ---- 3. Kumanda ----
+  var keyNames = { 37:'←', 38:'↑', 39:'→', 40:'↓', 13:'OK', 10009:'GERİ', 8:'GERİ(8)', 27:'ESC', 415:'OYNAT', 19:'DURAKLAT', 10252:'OYNAT/DURAKLAT', 417:'İLERİ', 412:'GERİ SAR', 413:'DURDUR', 179:'MediaPlayPause', 228:'İLERİ(228)', 227:'GERİ SAR(227)' };
+  function onKey(e) {
+    var k = { type:e.type, key:e.key, code:e.code, keyCode:e.keyCode, at:Date.now() };
+    if (e.type === 'keydown') {
+      R.keys.push(k);
+      var shown = R.keys.slice(-8).map(function (x) { return (keyNames[x.keyCode] || x.key || '?') + ' [' + x.keyCode + ']'; });
+      $('keys').textContent = shown.join('   ');
+      $('keys').className = '';
+      send();
+    }
+  }
+  document.addEventListener('keydown', onKey, true);
+  var mouseMoves = 0;
+  document.addEventListener('mousemove', function () { mouseMoves++; R.env.mouseMoves = mouseMoves; }, true);
+
+  $('fs').addEventListener('click', function () {
+    var el = $('stage'), fn = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (!fn) { R.fullscreen = 'api yok'; send(); return; }
+    v.src = 'media/h264_aac.mp4'; v.muted = true; v.play().catch(function () {});
+    try {
+      var p = fn.call(el);
+      if (p && p.then) p.then(function () { R.fullscreen = 'ok'; send(); setTimeout(function () { (document.exitFullscreen || document.webkitExitFullscreen).call(document); }, 4000); },
+                             function (e) { R.fullscreen = 'red: ' + e.name; send(); });
+      else { R.fullscreen = 'çağrıldı'; send(); }
+    } catch (e) { R.fullscreen = 'hata: ' + e.name; send(); }
+  });
+  $('again').addEventListener('click', function () { location.reload(); });
+
+  // ---- Çalıştır ----
+  env(); fontTest(); send();
+  var chain = Promise.resolve();
+  FILES.forEach(function (f, i) {
+    chain = chain.then(function () { status('Test ' + (i + 1) + '/' + FILES.length + ': ' + f[1]); return testOne(f[0], f[1]); });
+  });
+  chain.then(seekTest).then(subtitleTest).then(function () {
+    R.done = true; send();
+    status('Video testleri bitti ✅  Şimdi kumanda tuşlarına bas, sonra "Tam ekran dene"ye OK de.');
+    $('fs').focus();
+  });
+})();
+</script>
+</body>
+</html>
