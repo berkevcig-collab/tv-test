@@ -31,7 +31,7 @@
 </style>
 </head>
 <body>
-<h1>TV Tarayıcı Testi</h1>
+<h1>TV Tarayıcı Testi <span class="dim" style="font-size:22px">v2</span></h1>
 <div id="status">Hazırlanıyor…</div>
 
 <div class="grid">
@@ -41,6 +41,9 @@
       <div class="big">Kumanda testi</div>
       <div class="dim">Testler bitince sırayla bas: ↑ ↓ ← → OK, Oynat/Duraklat, İleri, Geri sar. <b>Geri (↩) tuşuna en son bas.</b></div>
       <div id="keys" class="dim">Henüz tuş yok</div>
+      <div id="ptr" class="dim">İmleç hareketi: 0 · tıklama: 0</div>
+      <div id="audioq" style="display:none;margin-top:10px"><span class="big">🔊 Şu an bip sesi duyuyor musun?</span><br><button class="btn" id="heard">Evet, duyuyorum</button><button class="btn" id="notheard">Hayır, ses yok</button></div>
+      <button class="btn" id="start">▶ Testi başlat</button>
       <button class="btn" id="fs">Tam ekran dene</button>
       <button class="btn" id="again">Testi tekrarla</button>
     </div>
@@ -92,7 +95,7 @@
     e.aspectRatioCss = !!(window.CSS && CSS.supports && CSS.supports('aspect-ratio', '16/9'));
     var m = /Chrome\/(\d+)/.exec(e.ua); e.chrome = m ? +m[1] : null;
     var mt = /Tizen (\d+\.\d+)/.exec(e.ua); e.tizenVersion = mt ? mt[1] : null;
-    row('env', 'Tarayıcı', (e.tizenVersion ? 'Tizen ' + e.tizenVersion + ' · ' : '') + (e.chrome ? 'Chrome ' + e.chrome : '?'));
+    row('env', '<b>Tarayıcı</b>', (e.tizenVersion ? 'Tizen ' + e.tizenVersion + ' · ' : '') + (e.chrome ? 'Chrome ' + e.chrome : '?'));
     row('env', 'Ekran / sayfa', e.screen + ' / ' + e.viewport + ' @' + e.dpr);
     row('env', 'MSE (akış)', e.mse ? '✅' : '❌', e.mse ? 'ok' : 'bad');
     row('env', 'Tam ekran API', e.fullscreenApi ? '✅' : '❌', e.fullscreenApi ? 'ok' : 'bad');
@@ -147,10 +150,11 @@
         r.textTracks = v.textTracks ? v.textTracks.length : 0;
         if (v.getVideoPlaybackQuality) { var q = v.getVideoPlaybackQuality(); r.frames = q.totalVideoFrames; r.dropped = q.droppedVideoFrames; }
         r.ok = r.t >= 1.5 && r.w > 0;
-        var noAudio = r.ok && r.audioBytes === 0;
+        var noAudio = false;
         var txt = r.ok ? ('✅ ' + r.w + 'x' + r.h) : ('❌ ' + (r.err || 'oynamadı'));
         if (noAudio) txt = '⚠️ görüntü var, ses yok';
-        if (r.ok && r.muted && !noAudio) txt += ' (sessiz)';
+        if (r.ok) txt += r.muted ? ' 🔇' : ' 🔊';
+        if (r.ok && r.audioBytes !== null) txt += ' a:' + r.audioBytes;
         if (file === 'h264_subs.mkv' && r.ok) txt += r.textTracks ? ' · altyazı ✅' : ' · altyazı ❌';
         tr.lastChild.textContent = txt;
         tr.lastChild.className = 'r ' + (noAudio ? 'warn' : r.ok ? 'ok' : 'bad');
@@ -179,14 +183,14 @@
       function end(ok, why) {
         if (done) return; done = true;
         R.seek = { ok:ok, ms: Date.now() - t0, why:why || null };
-        tr.lastChild.textContent = ok ? ('✅ ' + R.seek.ms + ' ms') : ('❌ ' + (why || ''));
+        tr.lastChild.textContent = (ok ? '✅ ' : '❌ ') + R.seek.ms + ' ms · ' + (why || '');
         tr.lastChild.className = 'r ' + (ok ? 'ok' : 'bad');
         v.pause(); send(); resolve();
       }
       v.muted = true;
-      v.src = 'media/h264_aac.mp4';
-      v.onloadedmetadata = function () { t0 = Date.now(); v.currentTime = 4.5; };
-      v.onseeked = function () { end(Math.abs(v.currentTime - 4.5) < 1); };
+      v.src = 'media/seek_k1.mp4';
+      v.onloadedmetadata = function () { t0 = Date.now(); v.currentTime = 6; };
+      v.onseeked = function () { var at = Math.round(v.currentTime * 10) / 10; R.seekAt = at; end(Math.abs(at - 6) < 1.2, 'gitti: ' + at + 's'); };
       v.onerror = function () { end(false, 'hata'); };
       setTimeout(function () { end(false, 'zaman aşımı'); }, 10000);
     }).then(function () { v.onloadedmetadata = v.onseeked = null; });
@@ -239,8 +243,10 @@
     }
   }
   document.addEventListener('keydown', onKey, true);
-  var mouseMoves = 0;
-  document.addEventListener('mousemove', function () { mouseMoves++; R.env.mouseMoves = mouseMoves; }, true);
+  var mouseMoves = 0, clicks = 0;
+  function ptr() { $('ptr').textContent = 'İmleç hareketi: ' + mouseMoves + ' · tıklama: ' + clicks; }
+  document.addEventListener('mousemove', function () { mouseMoves++; R.env.mouseMoves = mouseMoves; ptr(); }, true);
+  document.addEventListener('click', function () { clicks++; ptr(); }, true);
 
   $('fs').addEventListener('click', function () {
     var el = $('stage'), fn = el.requestFullscreen || el.webkitRequestFullscreen;
@@ -257,15 +263,31 @@
 
   // ---- Çalıştır ----
   env(); fontTest(); send();
+  status('▶ "Testi başlat"a bas (ses izni için bir kez tıklama gerekiyor).');
+  $('start').focus();
+  var started = false;
+  $('start').addEventListener('click', function () { if (started) return; started = true; run(); });
+  function audioQuestion() {
+    return new Promise(function (resolve) {
+      status('Ses testi: bip sesini duyuyor musun? Aşağıdan cevapla.');
+      v.muted = false; v.loop = true; v.src = 'media/h264_aac.mp4'; v.play().catch(function (e) { R.audioPlayErr = e.name; });
+      $('audioq').style.display = 'block'; $('heard').focus();
+      function answer(a) { R.heard = a; v.pause(); v.loop = false; $('audioq').innerHTML = '<span class="big ' + (a ? 'ok' : 'bad') + '">' + (a ? '🔊 Ses var' : '🔇 Ses yok') + '</span>'; send(); resolve(); }
+      $('heard').addEventListener('click', function () { answer(true); });
+      $('notheard').addEventListener('click', function () { answer(false); });
+    });
+  }
+  function run() {
   var chain = Promise.resolve();
   FILES.forEach(function (f, i) {
     chain = chain.then(function () { status('Test ' + (i + 1) + '/' + FILES.length + ': ' + f[1]); return testOne(f[0], f[1]); });
   });
-  chain.then(seekTest).then(subtitleTest).then(function () {
+  chain.then(seekTest).then(subtitleTest).then(audioQuestion).then(function () {
     R.done = true; send();
     status('Video testleri bitti ✅  Şimdi kumanda tuşlarına bas, sonra "Tam ekran dene"ye OK de.');
     $('fs').focus();
   });
+  }
 })();
 </script>
 </body>
