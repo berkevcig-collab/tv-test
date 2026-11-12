@@ -31,7 +31,7 @@
 </style>
 </head>
 <body>
-<h1>TV Tarayıcı Testi <span class="dim" style="font-size:22px">v2</span></h1>
+<h1>TV Tarayıcı Testi <span class="dim" style="font-size:22px">v3</span></h1>
 <div id="status">Hazırlanıyor…</div>
 
 <div class="grid">
@@ -177,23 +177,45 @@
   }
 
   function seekTest() {
+    var targets = [6, 10, 3];
+    R.seeks = [];
+    var tr = row('play', 'İleri sarma (oynarken)', '⏳', 'warn');
+    function one(target) {
+      return new Promise(function (resolve) {
+        var t0 = Date.now(), done = false;
+        function end(ok) {
+          if (done) return; done = true;
+          v.onseeked = null;
+          setTimeout(function () {
+            var at = Math.round(v.currentTime * 10) / 10;
+            R.seeks.push({ target: target, at: at, ms: Date.now() - t0, ok: Math.abs(at - target) < 1.5 });
+            resolve();
+          }, 700);
+        }
+        v.onseeked = function () { end(true); };
+        setTimeout(function () { end(false); }, 6000);
+        v.currentTime = target;
+      });
+    }
     return new Promise(function (resolve) {
-      var tr = row('play', 'İleri sarma (MP4)', '⏳', 'warn');
-      var t0 = 0, done = false;
-      function end(ok, why) {
-        if (done) return; done = true;
-        R.seek = { ok:ok, ms: Date.now() - t0, why:why || null };
-        tr.lastChild.textContent = (ok ? '✅ ' : '❌ ') + R.seek.ms + ' ms · ' + (why || '');
-        tr.lastChild.className = 'r ' + (ok ? 'ok' : 'bad');
-        v.pause(); send(); resolve();
-      }
       v.muted = true;
       v.src = 'media/seek_k1.mp4';
-      v.onloadedmetadata = function () { t0 = Date.now(); v.currentTime = 6; };
-      v.onseeked = function () { var at = Math.round(v.currentTime * 10) / 10; R.seekAt = at; end(Math.abs(at - 6) < 1.2, 'gitti: ' + at + 's'); };
-      v.onerror = function () { end(false, 'hata'); };
-      setTimeout(function () { end(false, 'zaman aşımı'); }, 10000);
-    }).then(function () { v.onloadedmetadata = v.onseeked = null; });
+      v.play().catch(function () {});
+      var waited = 0;
+      var w = setInterval(function () {
+        waited += 200;
+        if (v.currentTime > 1 || waited > 10000) {
+          clearInterval(w);
+          one(targets[0]).then(function () { return one(targets[1]); }).then(function () { return one(targets[2]); }).then(function () {
+            var okAll = R.seeks.every(function (x) { return x.ok; });
+            R.seek = { ok: okAll };
+            tr.lastChild.textContent = (okAll ? '✅ ' : '❌ ') + R.seeks.map(function (x) { return x.target + '→' + x.at; }).join('  ');
+            tr.lastChild.className = 'r ' + (okAll ? 'ok' : 'bad');
+            v.pause(); send(); resolve();
+          });
+        }
+      }, 200);
+    });
   }
 
   function subtitleTest() {
@@ -278,6 +300,7 @@
     });
   }
   function run() {
+  if (/only=seek/.test(location.search)) { seekTest().then(function () { status('Sarma testi bitti — fotoğraf çek.'); }); return; }
   var chain = Promise.resolve();
   FILES.forEach(function (f, i) {
     chain = chain.then(function () { status('Test ' + (i + 1) + '/' + FILES.length + ': ' + f[1]); return testOne(f[0], f[1]); });
